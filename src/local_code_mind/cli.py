@@ -1,66 +1,51 @@
-"""CLI output layer: Rich for humans, JSON for independent checks."""
+"""Zero-dependency CLI; JSON, call graph and standalone offline reports."""
 from __future__ import annotations
-
 import argparse
 import json
 import sys
 from pathlib import Path
-
-from rich.console import Console
-from rich.table import Table
-
 from .core import scan_project
+from .dead_code import analyze_call_graph
+from .exporter import write_reports, compliance_report
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        prog="local-code-mind",
-        description="Offline, read-only Python AST and Git diagnostics.",
-    )
-    parser.add_argument("target", nargs="?", default=".", help="Local directory or .py file")
-    parser.add_argument("--json", action="store_true", help="Machine-readable JSON output")
-    parser.add_argument("--max-files", type=int, default=500, metavar="N")
-    arguments = parser.parse_args(argv)
+def main(argv=None):
+    parser = argparse.ArgumentParser(prog="local-code-mind", description="Offline stdlib AST analysis")
+    parser.add_argument("target", nargs="?", default=".")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--max-files", type=int, default=500)
+    parser.add_argument("--dead-code", action="store_true", help="Include conservative static call graph")
+    parser.add_argument("--html", type=Path, metavar="FILE", help="Export standalone HTML and adjacent JSON")
+    args = parser.parse_args(argv)
     try:
-        result = scan_project(arguments.target, arguments.max_files)
-    except (ValueError, OSError) as error:
-        print(f"error: {error}", file=sys.stderr)
+        scan = scan_project(args.target, args.max_files)
+        graph = analyze_call_graph(args.target, args.max_files) if args.dead_code or args.html else None
+        if args.html:
+            paths = write_reports(args.html, scan, graph)
+        else:
+            paths = None
+    except (ValueError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
         return 2
-
-    if arguments.json:
-        print(json.dumps(result, indent=2, ensure_ascii=False))
+    if args.json:
+        output = {"scan": scan, "call_graph": graph, "compliance": compliance_report(scan, graph)} if graph else scan
+        print(json.dumps(output, indent=2, ensure_ascii=False))
         return 0
-
-    console = Console()
-    table = Table(title="local-code-mind | local repository diagnostics")
-    table.add_column("Metric", style="cyan")
-    table.add_column("Value", overflow="fold")
-    for name in (
-        "target", "python_version", "platform", "git_root", "git_branch",
-        "python_files", "functions", "classes", "skipped_large_files", "truncated",
-    ):
-        table.add_row(name.replace("_", " "), str(result[name]))
-    table.add_row("parse errors", str(len(result["parse_errors"])))
-    console.print(table)
-
-    if result["top_complexity"]:
-        scores = Table(title="Top AST branch scores (heuristic)")
-        scores.add_column("File")
-        scores.add_column("Function")
-        scores.add_column("Line", justify="right")
-        scores.add_column("Score", justify="right")
-        for item in result["top_complexity"]:
-            scores.add_row(
-                item["file"], item["function"],
-                str(item["line"]), str(item["branch_score"]),
-            )
-        console.print(scores)
-    if result["parse_errors"]:
-        console.print("[yellow]Parse errors (filenames only):[/yellow]")
-        for item in result["parse_errors"]:
-            console.print(f"  {item['file']}: {item['reason']}")
-    if result["truncated"]:
-        console.print("[yellow]File limit reached; scan is incomplete.[/yellow]")
+    print("local-code-mind | sovereign offline diagnostics")
+    for key in ("target", "python_version", "platform", "git_root", "git_branch", "python_files",
+                "functions", "classes", "skipped_large_files", "truncated"):
+        print(f"{key:22} {scan[key]}")
+    print(f"{'parse_errors':22} {len(scan['parse_errors'])}")
+    print("Top branch scores (heuristic):")
+    for item in scan["top_complexity"]:
+        print(f"  {item['branch_score']:3} {item['file']}:{item['line']} {item['function']}")
+    if graph:
+        print("Call graph:", len(graph["edges"]), "edges,", len(graph["dead_candidates"]), "uncalled candidates")
+        print("Unreachable:", len(graph["unreachable"]), "Unused imports:", len(graph["unused_imports"]))
+        for item in graph["dead_candidates"][:15]:
+            print("  candidate", item["symbol"], "confidence", item["confidence"])
+    if paths:
+        print("Exported:", paths[0], paths[1])
     return 0
 
 

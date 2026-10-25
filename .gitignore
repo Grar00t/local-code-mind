@@ -16,3 +16,6 @@ coverage.xml
 *.pem
 *.key
 .DS_Store
+
+# Local reports may contain absolute paths; do not publish
+reports/

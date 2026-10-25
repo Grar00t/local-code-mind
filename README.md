@@ -1,108 +1,87 @@
 # local-code-mind
 
-![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
-![Offline](https://img.shields.io/badge/runtime-offline-informational)
-![Tests](https://img.shields.io/badge/local%20tests-6%20passed-success)
+![Python](https://img.shields.io/badge/Python-3.10%2B-blue) ![License: MIT](https://img.shields.io/badge/License-MIT-green) ![Release](https://img.shields.io/badge/release-v1.1.0--sovereign-blueviolet) ![CI](https://img.shields.io/badge/CI-local%20tests%20only-informational)
 
-**Local-first, read-only Python AST inspection and Git diagnostics.** The CLI never imports or executes inspected source files and does not require a model, GPU, API key, paid service, or network connection at runtime.
+**Local-first, offline and read-only Python AST analyzer.** It summarizes a local repository's Python files, classes, functions, Git status context, and an explicit AST *branch-score heuristic*. It does not run the analyzed source, use hosted AI, or make network calls during scans.
 
-## Setup (Windows PowerShell)
+## Quick start (Windows PowerShell)
 
 ```powershell
 git clone https://github.com/Grar00t/local-code-mind.git
 cd local-code-mind
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -e ".[dev]"
-local-code-mind .
-local-code-mind . --json
-python -m pytest -q
+python -S src/main.py . --dead-code
+python -S src/main.py . --json
+python -S tools/build_zipapp.py
+python -I -S dist/local-code-mind.pyz . --dead-code --html reports/audit.html
 ```
 
-On Linux/macOS activate with `source .venv/bin/activate`. Installation of dependencies may require internet access once; **scanning itself does not**.
-
-For a source checkout on a machine with Rich installed, run without installation:
+To run directly from the checkout without installing any package:
 
 ```powershell
-python src/main.py "D:\path\to\another\repository"
-python src/main.py . --json --max-files 100
+python src/main.py .
+python src/main.py "D:\\projects\\other-repo" --max-files 100
 ```
 
-## Example Rich terminal output
+On Linux/macOS replace `python` with `python3` if needed. The tool is compatible with Python 3.10+. The core runtime has zero third-party dependencies. Source and zipapp execution need only Python. Optional `pip install -e .` uses a packaging backend and may fetch build tools, so it is not part of the air-gapped procedure.
+
+## Output preview
+
+Plain-text CLI output (illustrative; values depend on the scanned directory):
 
 ```text
-local-code-mind | local repository diagnostics
-Metric              Value
-target              D:\projects\local-code-mind
-python version      3.11.9
-git root            None
-python files        5
-functions           11
-classes             0
-parse errors        0
-
-Top AST branch scores (heuristic)
-File                        Function      Score
-src/local_code_mind/core.py scan_project  14
-src/local_code_mind/core.py _source_paths 10
+local-code-mind | sovereign offline diagnostics
+python_version         3.11.9
+python_files           16
+functions              49
+classes                4
+parse_errors           0
+Call graph: 51 edges, 25 uncalled candidates
+Unreachable: 0 Unused imports: 1
 ```
 
-The example above reflects the **pre-publication local scan**; counts may change after adding files.
-
-## JSON export
+For machine-readable export:
 
 ```powershell
-local-code-mind . --json > scan.json
+local-code-mind . --json > report.json
 ```
-
-Example excerpt (paths and counts depend on your repository):
 
 ```json
 {
-  "python_version": "3.11.9",
+  "target": "D:\\\\projects\\\\local-code-mind",
   "python_files": 5,
   "functions": 11,
   "classes": 0,
   "parse_errors": [],
-  "top_complexity": [
-    {
-      "file": "src/local_code_mind/core.py",
-      "function": "scan_project",
-      "branch_score": 14
-    }
-  ]
+  "truncated": false
 }
 ```
 
-## What it measures
+The JSON preview shows selected keys; actual output includes platform, Git context, file limits and top AST branch scores.
 
-- Counts Python files, function definitions and class definitions using Python's `ast` module.
-- Ranks five functions by a **branch-score heuristic**, not an exact McCabe cyclomatic complexity metric.
-- Reports local Git root and branch using read-only Git commands.
-- Reports syntax failures without executing the affected code.
-- Skips typical generated directories, symbolic links, and files above 512 KiB.
-- Limits scans to 500 Python files by default; `--max-files` supports 1 through 2000.
+## What is measured
 
-## Verification
+- Recursively count `.py` files, functions and classes without importing project code.
+- Rank functions using a **branch-score heuristic**, not full McCabe cyclomatic complexity; nested functions are evaluated separately.
+- Detect syntax/encoding failures, show Git repository root/branch when available, and produce deterministic JSON.
+- Default limit: 500 Python files (configurable with `--max-files N`, 1–2000); skip files larger than 512 KiB, symlinked files and common generated folders.
+- Report skipped files and truncated scans. This is **not** a malware sandbox, security scanner, multi-language analyzer or full repository history index.
+
+## Testing
 
 ```powershell
-$env:PYTHONPATH = "src"
-python -m pytest -q
-python -m compileall -q src tests hf_export.py
-python hf_export.py
+python -I -S -m unittest discover -s tests -v
+python -S tools/demo_self_heal.py
 ```
 
-The initial local phase passed **6/6 tests**. Release tests should be rerun after documentation and packaging changes. No GitHub Actions workflows are included.
+Twenty offline unit tests cover AST counts, cross-module calls, conservative dead-code candidates, unreachable branches, unused imports, safe HTML, rollback, and standalone zipapp operation. Tests run locally; **no GitHub Actions workflows** are bundled.
 
-## Hugging Face preparation
+## Self-healing limitations
 
-`python hf_export.py` prints a local SHA-256 manifest of selected documentation/metadata files. It performs **no uploads**, model synchronization, authentication, or API calls. It is not a trained model and is not a Hub publisher.
+The optional harness repairs missing colons only, after an explicit `--apply`. It retries locally and rolls back an unsuccessful change. Other bugs require manual review; never execute untrusted test suites.
 
-## Security and limitations
+## Release & license
 
-This is a static analysis aid, **not** a malware scanner or sandbox. Do not assume arbitrary repositories are safe to run or install. The tool reads files within the selected directory; treat JSON output as potentially sensitive if file paths are confidential. It does not guarantee full traversal in inaccessible directories or exact code complexity measurements.
-
-## License
-
-MIT — see [LICENSE](LICENSE).
+- v1.0.0: first verified local CLI release.
+- v1.1.0-sovereign: standard-library-only runtime, call-graph candidates, offline HTML/JSON exporter, bounded self-healing harness.
+- MIT License, see [LICENSE](LICENSE).
+- No model weights or datasets are included. Hugging Face export/sync is optional and is not part of the local scan.
